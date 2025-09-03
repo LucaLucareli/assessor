@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: agentes-db-postgres
+    env_file:
+      - .env
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./informações.sql:/docker-entrypoint-initdb.d/informações.sql:ro
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      retries: 5
+      timeout: 3s
+
+  redis:
+    image: redis:7.2
+    container_name: agentes-cache
+    restart: always
+    mem_limit: 2.5G
+    memswap_limit: 4G
+    cpus: 2
+    env_file:
+      - .env
+    volumes:
+      - redis:/data
+    ports:
+      - '${REDIS_CACHE_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      retries: 5
+      timeout: 3s
+
+  mongo:
+    image: mongo:6.0
+    container_name: agentes-mongo
+    ports:
+      - '${MONGO_PORT:-27017}:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  redis:
+    driver: local
+  postgres:
+    driver: local
+  mongo_data:
+    driver: local

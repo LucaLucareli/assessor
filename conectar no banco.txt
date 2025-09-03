@@ -1,0 +1,2 @@
+docker exec -it agentes-db-postgres psql -U postgres -d agentes
+\dt
