@@ -6,14 +6,16 @@ from langchain_core.prompts import (
     SystemMessagePromptTemplate,
     FewShotChatMessagePromptTemplate
 )
+from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.chat_message_histories import ChatMessageHistory
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from pg_tools import TOOLS
 import unicodedata
-import io, sys
+import sys
+import io
 import os
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -27,6 +29,9 @@ llm = ChatGoogleGenerativeAI(
     top_p=0.95,
     google_api_key=os.getenv("GEMINI_API_KEY"),
 )
+
+fuso_brasilia = timezone(timedelta(hours=-3))
+today = datetime.now(fuso_brasilia)
 
 system_prompt = SystemMessagePromptTemplate.from_template(
     """
@@ -55,7 +60,9 @@ system_prompt = SystemMessagePromptTemplate.from_template(
         - Utilize dados **fornecidos e históricos**, a menos que o usuário peça explicitamente para ignorar o histórico.  
         - Nunca invente informações; se faltar dado, **solicite de forma clara e direta**.  
         - Mantenha o tom **empático, confiável e prático**, sem jargões ou rodeios.  
-        - As respostas devem ser **curtas, úteis e imediatamente aplicáveis**.  
+        - As respostas devem ser **curtas, úteis e imediatamente aplicáveis**.   
+        - Sempre considere **a data atual ({today_local})** ao sugerir compromissos, treinos, pagamentos ou hábitos alimentares.  
+        - Ao lidar com perguntas sobre dias específicos (hoje, amanhã, esta semana), utilize **a data atual** como referência para cálculos e recomendações.
 
         ### FORMATO DE RESPOSTA
         - <sua resposta será 1 frase objetiva sobre a situação>
@@ -98,6 +105,8 @@ prompt = ChatPromptTemplate.from_messages([
     HumanMessagePromptTemplate.from_template("{input}"),
     MessagesPlaceholder(variable_name="agent_scratchpad"),
 ])
+
+prompt = prompt.partial(today_local=today.isoformat())
 
 store = {}
 
