@@ -122,6 +122,20 @@ class AddMealArgs(BaseModel):
     )
     notes: Optional[str] = Field(default=None, description="Observações da refeição.")
 
+class QueryTransactionsArgs(BaseModel):
+    text: Optional[str] = Field(None, description="Texto para busca em 'source_text' ou 'description'")
+    type_name: Optional[str] = Field(None, description="Nome do tipo de transação")
+    date_local: Optional[str] = Field(None, description="Data exata da transação (formato YYYY-MM-DD)")
+    date_from_local: Optional[str] = Field(None, description="Data inicial para filtro por intervalo (YYYY-MM-DD)")
+    date_to_local: Optional[str] = Field(None, description="Data final para filtro por intervalo (YYYY-MM-DD)")
+    limit: int = Field(20, description="Quantidade máxima de registros a retornar")
+
+
+class EmptyArgs(BaseModel):
+    pass
+
+class DailyBalanceArgs(BaseModel):
+    date_local: str = Field(..., description="Dia local no formato YYYY-MM-DD para calcular o saldo.")
 
 @tool("add_transaction", args_schema=AddTransactionArgs)
 def add_transaction(
@@ -186,12 +200,8 @@ def add_transaction(
                 ),
             )
 
-        row = cur.fetchone()
 
-        if row is not None:
-            new_id, occurred = row
-        else:
-            new_id, occurred = None, None
+        new_id, occurred = cur.fetchone() or [None, None]
 
         conn.commit()
         return {"status": "ok", "id": new_id, "occurred_at": str(occurred)}
@@ -305,5 +315,148 @@ def add_meal(
         except Exception:
             pass
 
+@tool(
+    "query_transactions",
+    args_schema=QueryTransactionsArgs,
+    description="Consulta transações no banco com filtros opcionais"
+)
+def query_transactions(
+    text: Optional[str] = None,
+    type_name: Optional[str] = None,
+    date_local: Optional[str] = None,
+    date_from_local: Optional[str] = None,
+    date_to_local: Optional[str] = None,
+    limit: int = 20
+) -> dict:
+    conn = get_conn()
+    cur = conn.cursor()
+    filters = []
+    params = []
 
-TOOLS = [add_transaction, add_workout, add_meal]
+    conditions = [
+        (text, "(source_text ILIKE %s OR description ILIKE %s)", lambda v: [f"%{v}%", f"%{v}%"]),
+        (type_name, "type = (SELECT id FROM transaction_types WHERE type ILIKE %s)", lambda v: [v]),
+        (date_local, "(occurred_at AT TIME ZONE 'America/Sao_Paulo')::date = %s::date", lambda v: [v]),
+        ((date_from_local, date_to_local) if date_from_local and date_to_local else None,
+        "(occurred_at AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN %s::date AND %s::date",
+        lambda v: list(v) if v else [])
+    ]
+
+    for val, sql, to_params in conditions:
+        if val:
+            filters.append(sql)
+            params.extend(to_params(val))
+
+        where_clause = " AND ".join(filters)
+        if where_clause:
+            where_clause = "WHERE " + where_clause
+
+        order_clause = "ORDER BY occurred_at ASC" if date_from_local or date_to_local else "ORDER BY occurred_at DESC"
+
+    try:
+        query = f"""
+            SELECT t.id, t.amount, tt.type, t.category_id, t.description, t.payment_method,
+                t.occurred_at AT TIME ZONE 'America/Sao_Paulo' AS occurred_local,
+                t.source_text
+            FROM transactions t
+            JOIN transaction_types tt ON t.type = tt.id
+            {where_clause}
+            {order_clause}
+            LIMIT %s
+        """
+        params.append(limit)
+
+        cur.execute(query, params)
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        return {"transactions": results}
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        try:
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
+
+@tool(
+    "total_balance",
+    args_schema=EmptyArgs,
+    description="Retorna o saldo total considerando todas as transações, ignorando transferências (type = 3)."
+)
+def total_balance() -> dict:
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        query = """
+        SELECT
+            COALESCE(SUM(CASE WHEN type = 1 THEN amount ELSE 0 END), 0) AS total_income,
+            COALESCE(SUM(CASE WHEN type = 2 THEN amount ELSE 0 END), 0) AS total_expenses
+        FROM transactions
+        WHERE type != 3
+        """
+        cur.execute(query)
+        row = cur.fetchone() or [0, 0]
+        total_income, total_expenses = float(row[0]), float(row[1])
+        cur.close()
+        conn.close()
+
+        return {
+            "total_income": total_income,
+            "total_expenses": total_expenses,
+            "balance": total_expenses - total_income
+        }
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        try:
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
+
+@tool(
+    "daily_balance",
+    args_schema=DailyBalanceArgs,
+    description="Retorna o saldo do dia informado (YYYY-MM-DD) em America/Sao_Paulo, considerando receitas e despesas e ignorando transferências (type = 3)."
+)
+def daily_balance(date_local: str) -> dict:
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        query = """
+        SELECT
+            COALESCE(SUM(CASE WHEN type = 1 THEN amount ELSE 0 END), 0) AS total_income,
+            COALESCE(SUM(CASE WHEN type = 2 THEN amount ELSE 0 END), 0) AS total_expenses
+        FROM transactions
+        WHERE (occurred_at AT TIME ZONE 'America/Sao_Paulo')::date = %s
+        AND type != 3
+        """
+        cur.execute(query, (date_local,))
+        row = cur.fetchone() or [0, 0]
+        total_income, total_expenses = float(row[0]), float(row[1])
+        cur.close()
+        conn.close()
+
+        return {
+            "date_local": date_local,
+            "total_income": total_income,
+            "total_expenses": total_expenses,
+            "balance": total_income - total_expenses
+        }
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "message": str(e)}
+    finally:
+        try:
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
+
+
+TOOLS = [add_transaction, add_workout, add_meal, query_transactions, total_balance, daily_balance]
