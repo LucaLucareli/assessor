@@ -285,7 +285,6 @@ prompt_roteador = ChatPromptTemplate.from_messages([
     fewshots_roteador,
     MessagesPlaceholder(variable_name="chat_history"),
     HumanMessagePromptTemplate.from_template("{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad"),
 ]).partial(today_local=today.isoformat())
 
 prompt_financeiro = ChatPromptTemplate.from_messages([
@@ -325,5 +324,4 @@ prompt_orquestrador = ChatPromptTemplate.from_messages([
     fewshots_orquestrador,
     MessagesPlaceholder(variable_name="chat_history"),
     HumanMessagePromptTemplate.from_template("{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad"),
 ]).partial(today_local=today.isoformat())
