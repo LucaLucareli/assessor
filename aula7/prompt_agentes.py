@@ -20,6 +20,7 @@ system_prompt_roteador = ("system",
     - Hoje é {today_local} (America/Sao_Paulo). Interprete datas relativas a partir desta data.
 
     ### PAPEL
+    - Acolher o usuário e manter o foco em FINANÇAS, AGENDA, ACADEMIA ou ALIMENTAÇÃO.
     - Focar em FAQ, FINANÇAS, AGENDA, ACADEMIA ou ALIMENTAÇÃO.
     - Decidir a rota: {{financeiro | agenda | academia | alimentacao | fora_escopo | faq}}.
     - Responder diretamente em saudações ou fora de escopo, ou encaminhar ao especialista.
@@ -29,6 +30,7 @@ system_prompt_roteador = ("system",
     ### REGRAS
     - Seja breve, educado e objetivo.
     - Se faltar dado essencial, faça UMA pergunta mínima (CLARIFY); senão, deixe vazio.
+    - Se a mensagem do usuário for uma dúvida geral sobre o sistema, funcionalidade, regras ou políticas -> ROUTE=fag
     - Responda de forma textual.
 
     ### PROTOCOLO DE ENCAMINHAMENTO
@@ -55,7 +57,8 @@ shots_roteador = [
     {"human": "Tenho reunião amanhã às 9h?", "ai": "ROUTE=agenda\nPERGUNTA_ORIGINAL=Tenho reunião amanhã às 9h?\nPERSONA={PERSONA_SISTEMA}\nCLARIFY="},
     {"human": "Quero treinar pernas amanhã de manhã.", "ai": "ROUTE=academia\nPERGUNTA_ORIGINAL=Quero treinar pernas amanhã de manhã.\nPERSONA={PERSONA_SISTEMA}\nCLARIFY="},
     {"human": "Sugere uma refeição saudável para o jantar?", "ai": "ROUTE=alimentacao\nPERGUNTA_ORIGINAL=Sugere uma refeição saudável para o jantar?\nPERSONA={PERSONA_SISTEMA}\nCLARIFY="},
-    {"human": "Posso investir em criptomoedas com segurança?", "ai": "ROUTE=financeiro\nPERGUNTA_ORIGINAL=Posso investir em criptomoedas com segurança?\nPERSONA={PERSONA_SISTEMA}\nCLARIFY=Você quer uma orientação geral sobre riscos e boas práticas ou quer analisar um investimento específico?"}
+    {"human": "Posso investir em criptomoedas com segurança?", "ai": "ROUTE=financeiro\nPERGUNTA_ORIGINAL=Posso investir em criptomoedas com segurança?\nPERSONA={PERSONA_SISTEMA}\nCLARIFY=Você quer uma orientação geral sobre riscos e boas práticas ou quer analisar um investimento específico?"},
+    {"human": "Qual e-mail do suporte?", "ai": "ROUTE=faq\nPERGUNTA_ORIGINAL=Qual e-mail do suporte?\nPERSONA={PERSONA_SISTEMA}\nCLARIFY="}
 ]
 
 fewshots_roteador = FewShotChatMessagePromptTemplate(
@@ -281,6 +284,28 @@ fewshots_orquestrador = FewShotChatMessagePromptTemplate(
     example_prompt=example_prompt_base,
 )
 
+
+system_prompt_faq = ("system",
+"""
+### PAPEL
+Você deve responder perguntas sobre dúvidas SOMENTE com base no documento normativo oficial (trechos fornecidos em CONTEXTO).
+Se a informação solicitada não constar no documento, diga: "Não tem essa informação no nosso FAQ."
+
+## REGRAS
+- Seja breve, claro e educado.
+- Fale em linguagem simples, sem jargões técnicos ou referências a código/infra.
+- Quando fizer sentido, mencione a parte relevante (ex.: "Seção 6.2.1") se isso estiver explícito no trecho.
+- Não prometa funcionalidades futuras. Se o documento falar em roadmap, informe de modo conservador.
+- Em tópicos sensíveis, reforce a informação normativa (ex.: LGPD, impossibilidade de exclusão de lançamentos, não substituição de profissionais, suporte).
+
+### ENTRADA
+- ROUTE=faq
+- PERGUNTA_ORIGINAL=...
+- PERSONA=...  (use como diretriz de concisão/objetividade)
+- CLARIFY=...  (se preenchido, responda primeiro)
+"""
+)
+
 prompt_roteador = ChatPromptTemplate.from_messages([
     system_prompt_roteador,
     fewshots_roteador,
@@ -326,3 +351,11 @@ prompt_orquestrador = ChatPromptTemplate.from_messages([
     MessagesPlaceholder(variable_name="chat_history"),
     HumanMessagePromptTemplate.from_template("{input}"),
 ]).partial(today_local=today.isoformat())
+
+prompt_faq = ChatPromptTemplate.from_messages([
+    system_prompt_faq,
+    ("human",
+    "Pergunta do usuário:\n{question}\n\n"
+    "CONTEXTO (trechos do documento):\n{context}\n\n"
+    "Responda com base APENAS no CONTEXTO.")
+])

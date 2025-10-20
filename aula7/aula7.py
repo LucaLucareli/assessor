@@ -4,13 +4,16 @@ from prompt_agentes import (
     prompt_agenda,
     prompt_academia,
     prompt_alimentacao,
-    prompt_orquestrador
+    prompt_orquestrador,
+    prompt_faq,
 )
+from langchain_core.runnables import RunnableWithMessageHistory, RunnablePassthrough
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
-from langchain_core.runnables import RunnableWithMessageHistory
 from langchain_core.output_parsers import StrOutputParser
 from langchain.memory import ChatMessageHistory
+from faq_tools import get_faq_context
+from operator import itemgetter
 from dotenv import load_dotenv
 from pg_tools import TOOLS
 import unicodedata
@@ -107,11 +110,20 @@ chain_orquestrador = RunnableWithMessageHistory(
     history_messages_key="chat_history"
 )
 
+chain_faq = (
+    RunnablePassthrough.assign(
+        question=itemgetter('input'),
+        context=lambda x: get_faq_context(x['input'])
+    )
+    | prompt_faq | llm_fast | StrOutputParser
+)
+
 rota_map = {
     "financeiro": chain_financeiro,
     "agenda": chain_agenda,
     "academia": chain_academia,
     "alimentacao": chain_alimentacao,
+    "faq": chain_faq,
     "fora_escopo": None
 }
 
