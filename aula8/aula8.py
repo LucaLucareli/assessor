@@ -8,11 +8,11 @@ from prompt_agentes import (
     prompt_faq,
 )
 from langchain_core.runnables import RunnableWithMessageHistory, RunnablePassthrough
-from langchain.agents.tool_calling import create_tool_calling_agent
+from langchain.agents import create_tool_calling_agent
 from langchain.agents import AgentExecutor
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
-from langchain.memory import ChatMessageHistory
+from langchain_community.chat_message_histories import ChatMessageHistory
 from faq_tools import get_faq_context
 from operator import itemgetter
 from dotenv import load_dotenv
@@ -114,10 +114,12 @@ chain_orquestrador = RunnableWithMessageHistory(
 
 chain_faq = (
     RunnablePassthrough.assign(
-        question=itemgetter('input'),
+        question=lambda x: x['input'],
         context=lambda x: get_faq_context(x['input'])
     )
-    | prompt_faq | llm_fast | StrOutputParser
+    | prompt_faq
+    | llm_fast
+    | StrOutputParser()
 )
 
 rota_map = {
@@ -198,10 +200,11 @@ def router_node(state: dict) -> dict:
 
 def faq_node(state: dict) -> dict:
     result = chain_faq.invoke(
-        {"input": state['roteador']}, 
+        {"input": state['input']}, 
         config={"configurable": {"session_id": state["session_id"]}}
-    )  
-    return {"saida_especialista": result["output"], 'session_id': state['session_id']}
+    )
+    
+    return {"resposta_usuario": result, "session_id": state["session_id"]}
 
 def financeiro_node(state: dict) -> dict:
     result = executor_financeiro.invoke(
@@ -232,6 +235,8 @@ def decide_after_router(state: dict) -> str:
         return "financeiro"
     if rota == "agenda":
         return "agenda"
+    if rota == "faq":
+        return "faq"
     return "end"
 
 def decide_after_specialist(state: dict) -> str:
@@ -245,6 +250,7 @@ graph = StateGraph(dict)
 graph.add_node("roteador", router_node)
 graph.add_node("financeiro", financeiro_node)
 graph.add_node("agenda", agenda_node)
+graph.add_node("faq", faq_node)
 graph.add_node("orquestrador", orchestrator_node)
 
 graph.add_edge(START, "roteador")
@@ -255,6 +261,7 @@ graph.add_conditional_edges(
     {
         "financeiro": "financeiro",
         "agenda": "agenda",
+        "faq": "faq",
         "end": END,
     },
 )
@@ -271,6 +278,7 @@ graph.add_conditional_edges(
 )
 
 graph.add_edge("orquestrador", END)
+graph.add_edge("faq", END)
 
 app = graph.compile()
 
